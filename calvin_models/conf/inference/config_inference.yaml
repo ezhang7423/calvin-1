@@ -1,10 +1,10 @@
-train_folder: ???  # config path to the config.yaml of the training folder (in .hydra)
+train_folder: ??? # config path to the config.yaml of the training folder (in .hydra)
 load_checkpoint: ???
 seed: 42
 log_dir: /tmp
 visualize: True
 ep_len: 120
-replan_freq: 30
+replan_freq: 16
 processes: 1
 
 hydra:

@@ -1,8 +1,12 @@
+from multiprocessing import shared_memory
+import pickle
+import random
 from collections import Counter
 from itertools import chain
 import logging
 import multiprocessing
 import os
+from pathlib import Path
 from typing import Any
 
 from calvin_agent.evaluation.multistep_sequences import get_sequences
@@ -36,18 +40,14 @@ def divide_across_ranks(elements, world_size, rank):
     return elements // world_size + rest(elements, world_size, rank)
 
 
-def sequences_for_rank(num_sequences):
+def sequences_for_rank(num_sequences, array):
     """
     When using ddp, determine how many sequences every process should evaluate.
     """
     rank = dist.get_rank()
     ws = dist.get_world_size()
     num_seq_per_gpu = divide_across_ranks(num_sequences, ws, rank)
-    num_workers = multiprocessing.cpu_count() // ws
-    return [
-        seq.tolist()
-        for seq in np.array_split(get_sequences(num_sequences, num_workers=num_workers), ws)[rank][:num_seq_per_gpu]
-    ]
+    return [seq.tolist() for seq in np.array_split(array, ws)[rank][:num_seq_per_gpu]]
 
 
 def gather_results(local_results):
@@ -88,6 +88,7 @@ class RolloutLongHorizon(Callback):
         empty_cache,
         val_annotations,
         debug,
+        resample_freq,
     ):
         self.env = None  # type: Any
         self.env_cfg = env_cfg
@@ -108,6 +109,14 @@ class RolloutLongHorizon(Callback):
         self.eval_sequences = None
         self.val_annotations = val_annotations
         self.debug = debug
+        self.resample_freq = resample_freq
+        if resample_freq:
+            try:
+                existing_shm = shared_memory.SharedMemory(name='eval_seq')
+                self.preloaded_sequences = pickle.loads(existing_shm.buf)
+            except FileNotFoundError:
+                self.preloaded_sequences = torch.load(Path(os.environ["DATA_GRAND_CENTRAL"]) / "eval_sequences.pt")
+                random.shuffle(self.preloaded_sequences)
 
     def on_validation_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Called when the validation loop begins."""
@@ -132,10 +141,20 @@ class RolloutLongHorizon(Callback):
                     save_dir=self.save_dir,
                 )
             pl_module.load_lang_embeddings(dataset.abs_datasets_dir / dataset.lang_folder / "embeddings.npy")  # type: ignore
-            if dist.is_available() and dist.is_initialized():
-                self.eval_sequences = sequences_for_rank(self.num_sequences)
+
+            if self.resample_freq:
+                if dist.is_available() and dist.is_initialized():
+                    self.eval_sequences = sequences_for_rank(self.num_sequences, self.preloaded_sequences)
+                else:
+                    self.eval_sequences = self.preloaded_sequences[:self.num_sequences]
             else:
-                self.eval_sequences = get_sequences(self.num_sequences)
+                if dist.is_available() and dist.is_initialized():
+                    num_workers = multiprocessing.cpu_count() // dist.get_world_size()
+                    self.eval_sequences = sequences_for_rank(
+                        self.num_sequences, get_sequences(self.num_sequences, num_workers=num_workers)
+                    )
+                else:
+                    self.eval_sequences = get_sequences(self.num_sequences)
 
     def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule, *args) -> None:  # type: ignore
         if pl_module.current_epoch == 0 and self.skip_epochs > 0:
@@ -173,7 +192,14 @@ class RolloutLongHorizon(Callback):
         return results
 
     def evaluate_sequence(self, model, initial_state, eval_sequence, record, i):
-        robot_obs, scene_obs = get_env_state_for_initial_condition(initial_state)
+        if self.rollout_freq:
+            robot_obs, scene_obs, task_goal_image = initial_state
+            if eval_sequence[0] != "place_in_drawer" and eval_sequence[0] != "place_in_slider":
+                robot_obs = None
+        else:
+            robot_obs, scene_obs = get_env_state_for_initial_condition(initial_state)
+            task_goal_image = None
+
         self.env.reset(robot_obs=robot_obs, scene_obs=scene_obs)
         if record:
             caption = " | ".join(eval_sequence)
@@ -187,7 +213,7 @@ class RolloutLongHorizon(Callback):
         for subtask in eval_sequence:
             if record:
                 self.rollout_video.new_subtask()
-            success = self.rollout(model, subtask, record)
+            success = self.rollout(model, subtask, record, task_goal_image=task_goal_image)
             if record:
                 self.rollout_video.draw_outcome(success)
             if success:
@@ -196,21 +222,32 @@ class RolloutLongHorizon(Callback):
                 return success_counter
         return success_counter
 
-    def rollout(self, model, subtask, record):
+    def rollout(self, model, subtask, record, task_goal_image=None):
         if self.debug:
             print(f"{subtask} ", end="")
         obs = self.env.get_obs()
         # get lang annotation for subtask
         lang_annotation = self.val_annotations[subtask][0]
+
+        if task_goal_image is not None:
+            goal = cuda_slice(task_goal_image, self.resample_freq, device=model.device)
+        else:
+            goal = lang_annotation
+
         model.reset()
         start_info = self.env.get_info()
         success = False
         for step in range(self.ep_len):
-            action = model.step(obs, lang_annotation)
+            if task_goal_image is not None and (
+                (step + self.resample_freq) < 64 and not ((step + 1) % self.resample_freq)
+            ):
+                goal = cuda_slice(task_goal_image, step + self.resample_freq, device=model.device)
+
+            action = model.step(obs, goal)
             obs, _, _, current_info = self.env.step(action)
             if self.debug and os.environ.get("DISPLAY") is not None:
                 img = self.env.render(mode="rgb_array")
-                join_vis_lang(img, lang_annotation)
+                join_vis_lang(img, goal)
             if record:
                 # update video
                 self.rollout_video.update(obs["rgb_obs"]["rgb_static"])
@@ -227,3 +264,22 @@ class RolloutLongHorizon(Callback):
         if record:
             self.rollout_video.add_language_instruction(lang_annotation)
         return success
+
+
+def cuda_slice(d, slice, device=None):
+    if isinstance(d, np.ndarray):
+        d = torch.from_numpy(d)
+    if isinstance(d, torch.Tensor):
+        if device is None:
+            return d.cuda()[slice].permute(2, 0, 1)[None, None]
+        else:
+            return d.to(device)[slice].permute(2, 0, 1)[None, None]
+    if isinstance(d, dict):
+        newb = {}
+        for k in d:
+            newb[k] = cuda_slice(d[k], slice, device)
+    if isinstance(d, list):
+        newb = []
+        for i in range(len(d)):
+            newb.append(cuda_slice(d[i], slice, device))
+    return newb

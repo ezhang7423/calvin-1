@@ -26,6 +26,7 @@ def log_rank_0(*args, **kwargs):
     # when using ddp, only log with rank 0 process
     if dist.is_available() and dist.is_initialized() and dist.get_rank() != 0:
         return
+    
     log_print.info(*args, **kwargs)
 
 
@@ -141,12 +142,10 @@ class RolloutLongHorizon(Callback):
                     save_dir=self.save_dir,
                 )
             pl_module.load_lang_embeddings(dataset.abs_datasets_dir / dataset.lang_folder / "embeddings.npy")  # type: ignore
-
+            if dist.is_available() and dist.is_initialized():
+                raise NotImplementedError('Distributed evaluation not supported')
             if self.resample_freq:
-                if dist.is_available() and dist.is_initialized():
-                    self.eval_sequences = sequences_for_rank(self.num_sequences, self.preloaded_sequences)
-                else:
-                    self.eval_sequences = self.preloaded_sequences[:self.num_sequences]
+                self.eval_sequences = self.preloaded_sequences[:self.num_sequences]
             else:
                 if dist.is_available() and dist.is_initialized():
                     num_workers = multiprocessing.cpu_count() // dist.get_world_size()

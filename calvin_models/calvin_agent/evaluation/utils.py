@@ -65,12 +65,12 @@ def collect_plan(model, plans, subtask):
         return
 
 
-def join_vis_lang(img, lang_text):
+def join_vis_lang(img, lang_text, name='simulation cam'):
     """Takes as input an image and a language instruction and visualizes them with cv2"""
     img = img[:, :, ::-1].copy()
     img = cv2.resize(img, (500, 500))
     add_text(img, lang_text)
-    cv2.imshow("simulation cam", img)
+    cv2.imshow(name, img)
     cv2.waitKey(1)
 
 

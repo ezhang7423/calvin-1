@@ -27,6 +27,7 @@ class CalvinDataModule(pl.LightningDataModule):
         root_data_dir: str = "datasets/task_D_D",
         transforms: DictConfig = DEFAULT_TRANSFORM,
         shuffle_val: bool = False,
+        dummy: bool = False,
         **kwargs: Dict,
     ):
         super().__init__()
@@ -44,8 +45,8 @@ class CalvinDataModule(pl.LightningDataModule):
         self.transforms = transforms
 
         self.use_shm = "shm_dataset" in self.datasets_cfg.vision_dataset._target_
-        self.dummy = 'dummy' in kwargs['model']
-
+        self.dummy = dummy
+        
     def prepare_data(self, *args, **kwargs):
         # check if files already exist
         dataset_exist = np.any([len(list(self.training_dir.glob(extension))) for extension in ["*.npz", "*.pkl"]])

@@ -143,7 +143,7 @@ class SharedMemoryLoader:
         Returns:
             Shared memory lookup dict.
         """
-        lang_data = np.load(self.dataset_dir / self.lang_folder / "auto_lang_ann.npy", allow_pickle=True).item()
+        lang_data = np.load(self.dataset_dir / self.lang_folder / "auto_lang_100%_with_bufidx.npy", allow_pickle=True).item()
         ep_start_end_ids = np.load(self.dataset_dir / "ep_start_end_ids.npy")
         lang_ep_start_end_ids = np.array(lang_data["info"]["indx"])  # each of them are 64
         lang_ann = lang_data["language"]["emb"]
@@ -162,7 +162,7 @@ class SharedMemoryLoader:
             f"(progress bar shows only worker process 0)."
         )
         print('*'*50)
-        print(f'Total episodes: {len(ep_start_end_ids)}')
+        print(f'Total episodes: {len(lang_ep_start_end_ids)}')
         print('*'*50)
             
         if self.n_proc > len(ep_start_end_ids):

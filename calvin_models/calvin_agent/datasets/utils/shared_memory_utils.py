@@ -161,7 +161,10 @@ class SharedMemoryLoader:
             f"Loading {self.dataset_type} language episodes into shared memory. "
             f"(progress bar shows only worker process 0)."
         )
-
+        print('*'*50)
+        print(f'Total episodes: {len(ep_start_end_ids)}')
+        print('*'*50)
+            
         if self.n_proc > len(ep_start_end_ids):
             self.n_proc = len(ep_start_end_ids)
         split_indices = np.array_split(ep_start_end_ids, self.n_proc, axis=0)

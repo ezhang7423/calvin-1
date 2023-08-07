@@ -153,7 +153,8 @@ class RolloutVideo:
         elif isinstance(self.logger, WandbLogger):
             self._log_videos_to_wandb()
         elif isinstance(self.logger, TensorBoardLogger):
-            self._log_videos_to_tb(global_step)
+            pass
+            # self._log_videos_to_tb(global_step)
         else:
             raise NotImplementedError
         self.videos = []

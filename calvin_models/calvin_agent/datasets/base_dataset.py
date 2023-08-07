@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 import pyhash
 import torch
 from torch.utils.data import Dataset
+import torch.distributed as dist
 
 hasher = pyhash.fnv1_32()
 logger = logging.getLogger(__name__)
@@ -185,6 +186,7 @@ class BaseDataset(Dataset):
         Returns:
             Size of the dataset.
         """
+        return int(10_000 * dist.get_world_size() * 2.5)
         return len(self.episode_lookup)
 
     def _get_pad_size(self, sequence: Dict) -> int:

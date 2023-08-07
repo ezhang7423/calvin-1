@@ -131,7 +131,7 @@ class RolloutLongHorizon(Callback):
                     log_to_file=self.log_video_to_file,
                     save_dir=self.save_dir,
                 )
-            pl_module.load_lang_embeddings(dataset.abs_datasets_dir / dataset.lang_folder / "embeddings.npy")  # type: ignore
+            pl_module.load_lang_embeddings(dataset.abs_datasets_dir / "lang_paraphrase-MiniLM-L3-v2" / "embeddings.npy")  # type: ignore
             if dist.is_available() and dist.is_initialized():
                 self.eval_sequences = sequences_for_rank(self.num_sequences)
             else:
@@ -165,6 +165,9 @@ class RolloutLongHorizon(Callback):
     def evaluate_policy(self, model):
         results = []
         for i, (initial_state, eval_sequence) in enumerate(self.eval_sequences):
+            if model.current_epoch % 5 and i >= 10:
+                break
+                                
             record = i < self.num_videos
             result = self.evaluate_sequence(model, initial_state, eval_sequence, record, i)
             results.append(result)

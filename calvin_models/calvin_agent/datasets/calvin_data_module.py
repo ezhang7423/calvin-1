@@ -110,6 +110,7 @@ class CalvinDataModule(pl.LightningDataModule):
                 batch_size=dataset.batch_size,
                 num_workers=dataset.num_workers,
                 pin_memory=False,
+                shuffle=True
             )
             for key, dataset in self.train_datasets.items()
         }

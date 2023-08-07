@@ -1,3 +1,5 @@
+import os
+import torch
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
@@ -348,7 +350,9 @@ def flatten(t):
 
 
 @functools.lru_cache
-def get_sequences(num_sequences=1000, num_workers=None):
+def get_sequences(num_sequences=1000, num_workers=None):    
+    if num_sequences == 1000 and os.path.exists('/home/ubuntu/get_sequences_1000.pt'):
+        return torch.load('/home/ubuntu/get_sequences_1000.pt', map_location='cpu')
     possible_conditions = {
         "led": [0, 1],
         "lightbulb": [0, 1],
@@ -384,6 +388,8 @@ def get_sequences(num_sequences=1000, num_workers=None):
 
 if __name__ == "__main__":
     results = get_sequences(1000)
+    
+    torch.save(results, '/home/ubuntu/get_sequences_1000.pt')
     counters = [Counter() for _ in range(5)]  # type: ignore
     for initial_state, seq in results:
         for i, task in enumerate(seq):
